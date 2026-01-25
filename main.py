@@ -1,7 +1,7 @@
 import os
 import datetime
-import threading
 import wave
+import threading
 from pynput import keyboard
 import pyaudio
 
@@ -9,16 +9,17 @@ FRAMES_PER_BUFFER = 3200
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100
-
 SAVE_DIR = "recordings"
+
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 frames = []
-stream = None
+recording = False
 p = pyaudio.PyAudio()
 
-def recordAudio():
-    global frames, recording
+
+def record_task():
+    global recording, frames
     stream = p.open(
         format=FORMAT,
         channels=CHANNELS,
@@ -34,7 +35,8 @@ def recordAudio():
     stream.stop_stream()
     stream.close()
 
-def saveFile():
+
+def save_file():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = os.path.join(SAVE_DIR, f"Recording_{timestamp}.wav")
 
@@ -44,25 +46,26 @@ def saveFile():
         wf.setframerate(RATE)
         wf.writeframes(b"".join(frames))
 
-    print(f"Saved: {filename} to {SAVE_DIR}")
+    print(f"Saved: {filename}")
+
 
 def on_release(key):
     global recording, frames
 
     if key == keyboard.Key.space:
         if not recording:
-            print("Recording started")
+            print("Recording started... (Press Space to stop)")
             recording = True
             frames = []
-
-            threading.Thread(target=recordAudio).start()
+            threading.Thread(target=record_task).start()
         else:
-            print("Recording stopped")
+            print("Recording stopped.")
             recording = False
-            saveFile()
+            save_file()
             return False
 
-print("press space to start or stop recording")
+
+print("Press SPACE to start/stop recording.")
 with keyboard.Listener(on_release=on_release) as listener:
     listener.join()
 
