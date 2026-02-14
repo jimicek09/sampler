@@ -4,89 +4,100 @@ import wave
 import threading
 import pyaudio
 from pynput import keyboard
+import time
+import simpleaudio as sa
 
-# Configuration
+start = time.time()
+end = None
+
 SAVE_DIR = "recordings"
 os.makedirs(SAVE_DIR, exist_ok=True)
+pressCount = 0
 
-# Global variables
 frames = []
 recording = False
 p = pyaudio.PyAudio()
+stream = p.open(format=pyaudio.paInt16,
+                        channels=1,
+                        rate=44100,
+                        input=True,
+                        frames_per_buffer=3200)
+
+stream.start_stream()
+
+def playAudio(filename):
+    global start
+    try:
+        print(f"Playing: {filename}")
+        wave_obj = sa.WaveObject.from_wave_file(filename)
+        play_obj = wave_obj.play()
+        play_obj.wait_done()
+        length = (time.time() - start) * 1000
+        print("Playback finished.")
+        print(f"Playback latency: {length:.2f} ms")
+    except FileNotFoundError:
+        print("Error: 'aplay' not found. Try 'sudo apt install alsa-utils'")
 
 
-def play_audio(filename):
-    """Opens a WAV file and plays it through the default output."""
-    print(f"Playing back: {filename}")
-    with wave.open(filename, 'rb') as wf:
-        # Open a stream for output
-        stream = p.open(
-            format=p.get_format_from_width(wf.getsampwidth()),
-            channels=wf.getnchannels(),
-            rate=wf.getframerate(),
-            output=True
-        )
-
-        # Read and play data in chunks
-        data = wf.readframes(1024)
-        while data:
-            stream.write(data)
-            data = wf.readframes(1024)
-
-        stream.stop_stream()
-        stream.close()
-    print("Playback finished.")
-
-
-def record_loop():
+def recordLoop():
     global recording, frames
-    stream = p.open(format=pyaudio.paInt16, channels=1, rate=44100,
-                    input=True, frames_per_buffer=3200)
-    while recording:
-        data = stream.read(3200, exception_on_overflow=False)
-        frames.append(data)
-    stream.stop_stream()
-    stream.close()
+    try:
+        while recording:
+            data = stream.read(3200, exception_on_overflow=False)
+            frames.append(data)
+    except Exception as e:
+        print(f"Recording Error: {e}")
 
 
-def save_and_play():
+def saveAndPlay():
+    global frames
+    if not frames: return
+
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join(SAVE_DIR, f"Recording_{timestamp}.wav")
+    filename = os.path.abspath(os.path.join(SAVE_DIR, f"Recording_{timestamp}.wav"))
 
-    # 1. Save the file
     with wave.open(filename, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
         wf.setframerate(44100)
         wf.writeframes(b"".join(frames))
+
     print(f"Saved: {filename}")
+    # Play in background
+    threading.Thread(target=playAudio, args=(filename,), daemon=True).start()
 
-    # 2. Play it back instantly in a new thread
-    threading.Thread(target=play_audio, args=(filename,), daemon=True).start()
 
-
-def on_press(key):
-    global recording, frames
+def onPress(key):
+    global recording, start, pressCount
     if key == keyboard.Key.space:
-        if not recording:
-            print("Recording started...")
+
+        pressCount += 1
+
+        if pressCount == 1:
+            print("Recording...")
             recording = True
-            frames = []
-            threading.Thread(target=record_loop, daemon=True).start()
-        else:
-            print("Recording stopped.")
+            frames.clear()
+            threading.Thread(target=recordLoop, daemon=True).start()
+        elif pressCount == 2:
+            print("Stopping...")
             recording = False
-            # Save and then trigger playback
-            save_and_play()
+            start = time.time()
+            saveAndPlay()
+        elif pressCount == 3:
+            latency = (time.time() - start) * 1000
+            print(f"it took the program circa {latency:.2f}ms to playback")
+            return False
 
     if key == keyboard.Key.esc:
         return False
 
 
 print("Controls: [SPACE] Record/Stop | [ESC] Quit")
-with keyboard.Listener(on_press=on_press) as listener:
+with keyboard.Listener(on_press=onPress) as listener:
     listener.join()
 
+stream.stop_stream()
+stream.close()
 p.terminate()
 
 

@@ -19,33 +19,22 @@ MIC_INDEX = None
 
 p = pyaudio.PyAudio()
 
-# --- Global State ---
 frames = []
 recording = False
 current_state = 0
 
+def start_recording():
+    stream = p.open(
+        format=FORMAT,
+        channels=CHANNELS,
+        rate=RATE,
+        input=True,
+        input_device_index=MIC_INDEX,
+        frames_per_buffer=CHUNK
+    )
 
-def record_loop():
-    global frames, recording
-    try:
-        stream = p.open(
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=RATE,
-            input=True,
-            input_device_index=MIC_INDEX,
-            frames_per_buffer=CHUNK
-        )
-
-        while recording:
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            frames.append(data)
-
-        stream.stop_stream()
-        stream.close()
-    except Exception as e:
-        print(f"Recording Error: {e}")
-        recording = False
+#dedicating a new thread just for the start recording function
+threading.Thread(target=start_recording, daemon=True).start()
 
 
 def save_and_play():
@@ -83,7 +72,6 @@ def on_press(key):
             current_state = 1
             recording = True
             frames.clear()
-            threading.Thread(target=record_loop, daemon=True).start()
 
         elif current_state == 1:
             print("Stopping...")
