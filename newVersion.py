@@ -20,22 +20,41 @@ MIC_INDEX = None
 p = pyaudio.PyAudio()
 
 frames = []
-recording = False
+recording = True
 current_state = 0
+stream = None
 
 def start_recording():
-    stream = p.open(
-        format=FORMAT,
-        channels=CHANNELS,
-        rate=RATE,
-        input=True,
-        input_device_index=MIC_INDEX,
-        frames_per_buffer=CHUNK
-    )
+    global stream, recording, initializedTime
+    initializedTime = time.time()
+    try:
+        stream = p.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            input_device_index=MIC_INDEX,
+            frames_per_buffer=CHUNK
+        )
+
+        while recording:
+            data = stream.read(CHUNK, exception_on_overflow=False)
+            frames.append(data)
+
+        stream.stop_stream()
+        stream.close()
+    except Exception as e:
+        print(f"Recording Error: {e}")
+        recording = False
 
 #dedicating a new thread just for the start recording function
 threading.Thread(target=start_recording, daemon=True).start()
 
+def delete_excess (startTime):
+    global frames
+    time_to_skip = initializedTime - startTime
+    chunks_to_remove = int((time_to_skip * RATE) / CHUNK)
+    frames = frames[chunks_to_remove:]
 
 def save_and_play():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -62,22 +81,23 @@ def save_and_play():
     except Exception as e:
         print(f"Error: {e}")
 
-
 def on_press(key):
-    global recording, current_state
+    global recording, current_state, startTime
 
     if key == keyboard.Key.space:
         if current_state == 0:
             print("Recording... (Press SPACE to stop)")
+            startTime = time.time()
             current_state = 1
-            recording = True
             frames.clear()
 
         elif current_state == 1:
             print("Stopping...")
             recording = False
+            delete_excess(startTime)
             current_state = 2
             threading.Thread(target=save_and_play, daemon=True).start()
+
 
         elif current_state == 2:
             print("Exiting program...")
