@@ -10,6 +10,7 @@ import time
 from pynput import keyboard
 import numpy as np
 import sounddevice as sd
+import mido
 
 # --- Config ---
 SAVE_DIR = "recordings"
@@ -137,38 +138,58 @@ def save_and_play():
         print(f"Error: {e}")
 
 def on_press(key):
-    global recording, current_state, startTime
+    pass
 
-    if key == keyboard.Key.space and initializedTime != -1:
-        if current_state == 0:
-            print("Recording... (Press SPACE to stop)")
-            startTime = time.time()
-            current_state = 1
-            frames.clear()
+def midi_listener():
+    global recording, current_state, startTime, playback_thread
 
-        elif current_state == 1:
-            print("Stopping...")
-            recording = False
-            # delete_excess(startTime)
-            current_state = 2
-            global playback_thread
-            playback_thread = threading.Thread(target=save_and_play)
-            playback_thread.start()
+    ports = mido.get_input_names()
+    port_name = None
+    for p_name in ports:
+        if "FBV Express Mk II" in p_name:
+            port_name = p_name
+            break
+    if port_name is None:
+        port_name = ports[0] if ports else None
+    if port_name is None:
+        print("No MIDI input ports found. Install 'mido' and an RTMIDI backend, or connect your device.")
+        return
 
-        elif current_state == 2:
-            print("Exiting program...")
-            stop_playback.set()
-            if playback_thread is not None and playback_thread.is_alive():
-                playback_thread.join(timeout=5)
-            return False
+    print(f"Using MIDI input: {port_name}")
+    with mido.open_input(port_name) as inport:
+        for msg in inport:
+            # CC 16 on MIDI channel 1 (mido channels are 0-based)
+            if msg.type == 'control_change' and msg.control == 16 and msg.channel == 0:
+                val = msg.value
+                # press (127): start recording (if idle) or exit (if in playback)
+                if val == 127:
+                    if current_state == 0 and initializedTime != -1:
+                        print("Recording... (hold switch to record)")
+                        startTime = time.time()
+                        current_state = 1
+                        frames.clear()
+                    elif current_state == 2:
+                        print("Exiting program...")
+                        stop_playback.set()
+                        if playback_thread is not None and playback_thread.is_alive():
+                            playback_thread.join(timeout=5)
+                        return
+                # release (0): stop recording and start playback
+                elif val == 0:
+                    if current_state == 1:
+                        print("Stopping...")
+                        recording = False
+                        # delete_excess(startTime)
+                        current_state = 2
+                        playback_thread = threading.Thread(target=save_and_play)
+                        playback_thread.start()
 
-
-with keyboard.Listener(on_press=on_press) as listener:
-    listener.join()
-
-# ensure playback thread finished before terminating PyAudio
+# listen for MIDI CC16 from FBV Express Mk II (blocks until exit)
+midi_listener()
+ 
+ # ensure playback thread finished before terminating PyAudio
 if playback_thread is not None and playback_thread.is_alive():
-    stop_playback.set()
-    playback_thread.join(timeout=5)
-
+     stop_playback.set()
+     playback_thread.join(timeout=5)
+ 
 p.terminate()
